@@ -89,28 +89,22 @@ export class FeishuClient {
       }
   }
 
-
-  async ensureAssetsFolder(parentToken: string, userToken?: string): Promise<string> {
+  async ensureFolder(parentToken: string, folderName: string, userToken?: string): Promise<string> {
       const token = userToken || await this.getTenantAccessToken();
-      const folderName = 'Wechat2doc Assets';
-      
-      // 1. Search for existing folder
-      // Note: Feishu search API is complex. For simplicity, we might just create one or list children.
-      // List children of root
+
       try {
           const response = await this.axiosInstance.get(`/drive/v1/files?page_size=50&folder_token=${parentToken}`, {
               headers: { Authorization: `Bearer ${token}` }
           });
-          
+
           if (response.data.code === 0 && response.data.data.files) {
-              const existing = response.data.data.files.find((f: any) => f.name === folderName && f.type === 'folder');
+              const existing = response.data.data.files.find((file: any) => file.name === folderName && file.type === 'folder');
               if (existing) return existing.token;
           }
-      } catch (e) {
-          console.warn('Failed to list folder, trying to create...');
+      } catch (error) {
+          console.warn(`Failed to list folder "${folderName}", trying to create it instead.`);
       }
 
-      // 2. Create if not found
       try {
           const response = await this.axiosInstance.post('/drive/v1/files/create_folder', {
               name: folderName,
@@ -118,14 +112,17 @@ export class FeishuClient {
           }, {
               headers: { Authorization: `Bearer ${token}` }
           });
-          
+
           if (response.data.code !== 0) throw new Error(response.data.msg);
           return response.data.data.token;
       } catch (error: any) {
-          // If creation fails, fallback to root
-          console.error('Failed to create assets folder:', error.message);
+          console.error(`Failed to create folder "${folderName}":`, error.message);
           return parentToken;
       }
+  }
+
+  async ensureAssetsFolder(parentToken: string, userToken?: string): Promise<string> {
+      return this.ensureFolder(parentToken, 'Wechat2doc Assets', userToken);
   }
 
   async uploadFile(filePath: string, parentNode: string, parentType: string = 'explorer', userToken?: string): Promise<string> {

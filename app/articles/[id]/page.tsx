@@ -5,6 +5,8 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import SyncButton from '@/components/SyncButton';
 import { format } from 'date-fns';
+import Link from 'next/link';
+import { prepareArticleHtmlForRender } from '@/lib/article-html';
 
 export default async function ArticlePage({ params }: { params: Promise<{ id: string }> }) {
     const { id } = await params;
@@ -13,20 +15,21 @@ export default async function ArticlePage({ params }: { params: Promise<{ id: st
         where: { id },
     });
 
-    if (!article || !article.content) {
+    if (!article || (!article.content && !article.contentHtml)) {
         notFound();
     }
 
     // Strip Frontmatter for display (Fix for legacy articles)
-    const cleanContent = article.content.replace(/^---\n[\s\S]*?\n---\n/, '');
+    const cleanContent = (article.content || '').replace(/^---\n[\s\S]*?\n---\n/, '');
+    const renderedHtml = article.contentHtml ? prepareArticleHtmlForRender(article.contentHtml) : null;
 
     return (
         <div className="min-h-screen text-[#1d1d1f] dark:text-white antialiased pb-20 transition-colors">
             {/* Navbar / Header Placeholder */}
             <div className="sticky top-0 z-10 bg-white/80 dark:bg-[#121212]/80 backdrop-blur-md border-b border-black/5 dark:border-white/5 px-6 py-4 flex items-center justify-between">
-                <a href="/" className="font-bold tracking-wider text-sm p-2 rounded-lg hover:bg-black/5 dark:hover:bg-white/10 transition-colors">
+                <Link href="/" className="font-bold tracking-wider text-sm p-2 rounded-lg hover:bg-black/5 dark:hover:bg-white/10 transition-colors">
                     ← 返回列表
-                </a>
+                </Link>
                 <SyncButton
                     articleId={article.id}
                     initialStatus={article.status}
@@ -56,6 +59,7 @@ export default async function ArticlePage({ params }: { params: Promise<{ id: st
 
                 {/* Content Container (Glass Box effect subtle) */}
                 <article className="
+             article-content
              prose prose-lg prose-slate max-w-none dark:prose-invert
              prose-headings:font-bold prose-headings:tracking-tight prose-headings:text-black dark:prose-headings:text-white
              prose-p:text-black/80 dark:prose-p:text-white/80 prose-p:leading-8
@@ -66,80 +70,80 @@ export default async function ArticlePage({ params }: { params: Promise<{ id: st
              bg-white/50 dark:bg-white/5 backdrop-blur-sm rounded-[32px] p-8 md:p-12 shadow-[0_2px_40px_-12px_rgba(0,0,0,0.05)]
              border border-white/40 dark:border-white/5
         ">
-                    <ReactMarkdown
-                        remarkPlugins={[remarkGfm]}
-                        components={{
-                            // Custom paragraph handler to support inline emoji images
-                            p: ({ node, children, ...props }) => {
-                                // Check if this paragraph contains only a single emoji image
-                                const childArray = Array.isArray(children) ? children : [children];
-                                const hasOnlyEmoji = childArray.length === 1 &&
-                                    typeof childArray[0] === 'object' &&
-                                    childArray[0] !== null &&
-                                    'props' in childArray[0] &&
-                                    childArray[0].props?.['data-emoji'] === 'true';
+                    {renderedHtml ? (
+                        <div dangerouslySetInnerHTML={{ __html: renderedHtml }} />
+                    ) : (
+                        <ReactMarkdown
+                            remarkPlugins={[remarkGfm]}
+                            components={{
+                                // Custom paragraph handler to support inline emoji images
+                                p: ({ node, children, ...props }) => {
+                                    const childArray = Array.isArray(children) ? children : [children];
+                                    const hasOnlyEmoji = childArray.length === 1 &&
+                                        typeof childArray[0] === 'object' &&
+                                        childArray[0] !== null &&
+                                        'props' in childArray[0] &&
+                                        childArray[0].props?.['data-emoji'] === 'true';
 
-                                if (hasOnlyEmoji) {
-                                    // Return just the emoji without wrapping paragraph
-                                    return <>{children}</>;
-                                }
+                                    if (hasOnlyEmoji) {
+                                        return <>{children}</>;
+                                    }
 
-                                return <p {...props}>{children}</p>;
-                            },
-                            img: ({ node, ...props }) => {
-                                let src = String(props.src || '');
-                                const alt = String(props.alt || '');
+                                    return <p {...props}>{children}</p>;
+                                },
+                                img: ({ node, ...props }) => {
+                                    let src = String(props.src || '');
+                                    const alt = String(props.alt || '');
 
-                                // Extended emoji detection with multiple URL patterns
-                                const emojiPatterns = [
-                                    'wx_fed/wechat_emotion',  // 微信表情包 (官方)
-                                    '/emoji/',                // 通用 emoji 路径
-                                    '/we-emoji/',             // 新版微信表情
-                                    '/emotion/',              // emotion 目录
-                                    'expression',             // 表情资源
-                                    'mpres/htmledition/images/icon',  // 旧版表情
-                                ];
+                                    const emojiPatterns = [
+                                        'wx_fed/wechat_emotion',
+                                        '/emoji/',
+                                        '/we-emoji/',
+                                        '/emotion/',
+                                        'expression',
+                                        'mpres/htmledition/images/icon',
+                                    ];
 
-                                const isEmoji = emojiPatterns.some(pattern => src.toLowerCase().includes(pattern.toLowerCase())) ||
-                                    alt.includes('wx_emoji_') ||
-                                    alt.toLowerCase().includes('emoji');
+                                    const isEmoji = emojiPatterns.some(pattern => src.toLowerCase().includes(pattern.toLowerCase())) ||
+                                        alt.includes('wx_emoji_') ||
+                                        alt.toLowerCase().includes('emoji');
 
-                                if (src.includes('mmbiz.qpic.cn') || src.includes('mp.weixin.qq.com')) {
-                                    // Use Image Proxy for WeChat images to bypass Referer check
-                                    const encodedUrl = encodeURIComponent(src);
-                                    src = `/api/image-proxy/${encodedUrl}/image.jpg`;
-                                }
+                                    if (src.includes('mmbiz.qpic.cn') || src.includes('mp.weixin.qq.com')) {
+                                        const encodedUrl = encodeURIComponent(src);
+                                        src = `/api/image-proxy/${encodedUrl}/image.jpg`;
+                                    }
 
-                                if (isEmoji) {
+                                    if (isEmoji) {
+                                        return (
+                                            // eslint-disable-next-line @next/next/no-img-element
+                                            <img
+                                                {...props}
+                                                src={src}
+                                                data-emoji="true"
+                                                className="inline w-[1.2em] h-[1.2em] mx-[0.1em] align-middle shadow-none rounded-none border-none !my-0 !p-0"
+                                                style={{ display: 'inline', verticalAlign: 'middle', margin: '0 0.1em' }}
+                                                loading="lazy"
+                                                alt={props.alt || 'emoji'}
+                                            />
+                                        );
+                                    }
+
                                     return (
                                         // eslint-disable-next-line @next/next/no-img-element
                                         <img
                                             {...props}
                                             src={src}
-                                            data-emoji="true"
-                                            className="inline w-[1.2em] h-[1.2em] mx-[0.1em] align-middle shadow-none rounded-none border-none !my-0 !p-0"
-                                            style={{ display: 'inline', verticalAlign: 'middle', margin: '0 0.1em' }}
+                                            className="rounded-[20px] shadow-lg my-8 w-full h-auto"
                                             loading="lazy"
-                                            alt={props.alt || 'emoji'}
+                                            alt={props.alt || 'article image'}
                                         />
                                     );
                                 }
-
-                                return (
-                                    // eslint-disable-next-line @next/next/no-img-element
-                                    <img
-                                        {...props}
-                                        src={src}
-                                        className="rounded-[20px] shadow-lg my-8 w-full h-auto"
-                                        loading="lazy"
-                                        alt={props.alt || 'article image'}
-                                    />
-                                );
-                            }
-                        }}
-                    >
-                        {cleanContent}
-                    </ReactMarkdown>
+                            }}
+                        >
+                            {cleanContent}
+                        </ReactMarkdown>
+                    )}
                 </article>
             </main>
         </div>

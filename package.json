@@ -6,10 +6,10 @@
   "main": "index.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "dev": "next dev",
+    "dev": "next dev --hostname 127.0.0.1 --port 3000",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "eslint ."
   },
   "keywords": [],
   "author": "",
@@ -25,6 +25,7 @@
     "cheerio": "^1.1.2",
     "commander": "^14.0.2",
     "date-fns": "^4.1.0",
+    "docx": "^9.7.1",
     "dotenv": "^17.2.3",
     "form-data": "^4.0.5",
     "jose": "^6.1.3",

@@ -1,67 +1,132 @@
 import { NextResponse } from 'next/server';
-import { FeishuClient } from '@/lib/feishu';
+
+import { auth } from '@/auth';
 import { prisma } from '@/lib/db';
 import { encrypt } from '@/lib/encryption';
-import { createSession } from '@/lib/session';
+import { FeishuClient } from '@/lib/feishu';
+import {
+  normalizeReturnTo,
+  verifyFeishuOAuthState,
+  withSearchParams,
+} from '@/lib/feishu-oauth';
+
+function redirectToReturnPath(
+  request: Request,
+  returnTo: string,
+  params: Record<string, string | null | undefined>
+) {
+  const nextPath = withSearchParams(returnTo, params);
+  return NextResponse.redirect(new URL(nextPath, request.url));
+}
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const code = searchParams.get('code');
+  const stateToken = searchParams.get('state');
+  const oauthError = searchParams.get('error');
+  const oauthErrorDescription = searchParams.get('error_description');
+  let returnTo = '/';
 
-  if (!code) {
-    return NextResponse.json({ error: 'No code provided' }, { status: 400 });
+  if (stateToken) {
+    try {
+      const state = await verifyFeishuOAuthState(stateToken);
+      returnTo = normalizeReturnTo(state.returnTo);
+    } catch {
+      returnTo = '/';
+    }
+  }
+
+  if (oauthError) {
+    console.error(
+      'Feishu OAuth authorization error:',
+      oauthError,
+      oauthErrorDescription
+    );
+    return redirectToReturnPath(request, returnTo, {
+      feishuError: 'authorization-denied',
+    });
+  }
+
+  if (!code || !stateToken) {
+    return redirectToReturnPath(request, returnTo, {
+      feishuError: 'missing-code',
+    });
   }
 
   try {
-    const client = new FeishuClient();
-    
-    // 1. Exchange code for tokens
-    const tokenData = await client.getUserAccessToken(code);
-    const { access_token, refresh_token, expires_in, open_id } = tokenData;
+    const state = await verifyFeishuOAuthState(stateToken);
+    returnTo = normalizeReturnTo(state.returnTo);
 
-    // 2. Get User Info
-    const userInfo = await client.getUserInfo(access_token);
-    const { name, avatar_url } = userInfo;
+    const session = await auth();
+    const currentUserId = session?.user?.id;
 
-    // 3. Encrypt Tokens
-    const encryptedAccessToken = encrypt(access_token);
-    const encryptedRefreshToken = encrypt(refresh_token);
-    const tokenExpiry = new Date(Date.now() + expires_in * 1000);
+    if (!currentUserId || currentUserId !== state.userId) {
+      return redirectToReturnPath(request, returnTo, {
+        feishuError: 'session-mismatch',
+      });
+    }
 
-    /* 
-    // Feishu login temporarily disabled in V0.6 cleanup
-    // 4. Upsert User in DB
-    const user = await prisma.user.upsert({
-      where: { feishuUserId: open_id },
-      update: {
-        name,
-        avatarUrl: avatar_url,
-        encryptedAccessToken: encrypt(access_token),
-        encryptedRefreshToken: encrypt(refresh_token),
-        tokenExpiry: new Date(Date.now() + expires_in * 1000),
-        lastLoginAt: new Date(),
-      },
-      create: {
-        feishuUserId: open_id,
-        name,
-        avatarUrl: avatar_url,
-        encryptedAccessToken: encrypt(access_token),
-        encryptedRefreshToken: encrypt(refresh_token),
-        tokenExpiry: new Date(Date.now() + expires_in * 1000),
-        lastLoginAt: new Date(),
+    const currentUser = await prisma.user.findUnique({
+      where: { id: currentUserId },
+      select: {
+        avatarUrl: true,
+        email: true,
+        id: true,
+        name: true,
       },
     });
-    
-    // Create session (simple cookie for MVP)
-    // In real world, use NextAuth or similar
-    const response = NextResponse.redirect(new URL("/", req.url));
-    response.cookies.set("userId", user.id, { httpOnly: true }); 
-    */
 
-    return NextResponse.redirect(new URL("/login?error=FeishuLoginDisabled", request.url));
+    if (!currentUser) {
+      return redirectToReturnPath(request, '/login', {
+        error: 'AccountNotFound',
+      });
+    }
 
-  } catch (error: any) {
-    console.error('Callback Error:', error);
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    const client = new FeishuClient();
+    const tokenData = await client.getUserAccessToken(code);
+    const { access_token, refresh_token, expires_in } = tokenData;
+
+    if (!access_token || !refresh_token || !expires_in) {
+      throw new Error('Feishu token response is incomplete');
+    }
+
+    const userInfo = await client.getUserInfo(access_token);
+    const feishuUserId = userInfo.open_id || tokenData.open_id;
+
+    if (!feishuUserId) {
+      throw new Error('Feishu did not return an open_id');
+    }
+
+    const linkedUser = await prisma.user.findFirst({
+      where: { feishuUserId },
+      select: { id: true },
+    });
+
+    if (linkedUser && linkedUser.id !== currentUserId) {
+      return redirectToReturnPath(request, returnTo, {
+        feishuError: 'already-bound',
+      });
+    }
+
+    await prisma.user.update({
+      where: { id: currentUserId },
+      data: {
+        avatarUrl: userInfo.avatar_url || currentUser.avatarUrl || undefined,
+        encryptedAccessToken: encrypt(access_token),
+        encryptedRefreshToken: encrypt(refresh_token),
+        feishuUserId,
+        name: currentUser.name || userInfo.name || currentUser.email || undefined,
+        tokenExpiry: new Date(Date.now() + expires_in * 1000),
+      },
+    });
+
+    return redirectToReturnPath(request, returnTo, {
+      feishu: 'connected',
+    });
+  } catch (error) {
+    console.error('Feishu callback error:', error);
+    return redirectToReturnPath(request, returnTo, {
+      feishuError: 'callback-failed',
+    });
   }
 }

@@ -1,10 +1,8 @@
 import { NextResponse } from "next/server";
-import { PrismaClient } from "@prisma/client";
 import { randomInt } from "crypto";
 import { z } from "zod";
 import nodemailer from "nodemailer";
-
-const prisma = new PrismaClient();
+import { prisma } from "@/lib/db";
 
 const sendCodeSchema = z.object({
   email: z.string().email("Invalid email address"),
@@ -84,7 +82,5 @@ export async function POST(req: Request) {
       { error: "Internal server error" },
       { status: 500 }
     );
-  } finally {
-    await prisma.$disconnect();
   }
 }

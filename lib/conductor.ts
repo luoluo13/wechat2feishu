@@ -1,13 +1,16 @@
-import { scrapeWeChatArticle } from './scraper';
-import { extractMetadata, extractContent } from './parser';
-import { convertToMarkdown } from './converter';
-import { localizeAssets } from './assets';
-import { FeishuClient } from './feishu';
-import { prisma } from './db';
-import { getValidUserAccessToken } from './user-token';
-import path from 'path';
 import fs from 'fs';
 import os from 'os';
+import path from 'path';
+
+import { localizeContentAssets } from './assets';
+import { convertToMarkdown } from './converter';
+import { prisma } from './db';
+import { exportArticleHtmlToDocxBuffer } from './docx-export';
+import { FeishuSyncError } from './feishu-errors';
+import { FeishuClient } from './feishu';
+import { extractContent, extractMetadata } from './parser';
+import { scrapeWeChatArticle } from './scraper';
+import { getValidUserAccessToken } from './user-token';
 
 /**
  * PHASE 1: Server-First Processing
@@ -15,39 +18,38 @@ import os from 'os';
  * No longer saves to 'output/' folder.
  */
 export async function processArticle(url: string, userId?: string) {
-  // --- STEP 0: SMART CACHE CHECK ---
-  // Check if ANY user has already stored this article successfully.
   const existingArticle = await prisma.article.findFirst({
     where: {
       originalUrl: url,
       status: 'stored',
-      content: { not: null } // Ensure content exists
+      content: { not: null },
+      contentHtml: { not: null },
     },
-    orderBy: { updatedAt: 'desc' } // Use the most recent one
+    orderBy: { updatedAt: 'desc' },
   });
 
   if (existingArticle) {
     console.log(`[SmartCache] Hit! Found existing article: ${existingArticle.id}`);
-    
-    // Check if CURRENT user already has this article
+
     if (userId) {
       const userArticle = await prisma.article.findFirst({
         where: {
           originalUrl: url,
-          userId: userId
-        }
+          userId,
+        },
       });
 
       if (userArticle) {
-        console.log(`[SmartCache] User ${userId} already owns this article. Updating timestamp.`);
+        console.log(
+          `[SmartCache] User ${userId} already owns this article. Updating timestamp.`
+        );
         await prisma.article.update({
           where: { id: userArticle.id },
-          data: { updatedAt: new Date() } // Touch it to bring to top
+          data: { updatedAt: new Date() },
         });
         return { success: true, articleId: userArticle.id, status: 'stored' };
       }
 
-      // Clone for new user (Soft Clone)
       console.log(`[SmartCache] Cloning article for user ${userId}...`);
       const newArticle = await prisma.article.create({
         data: {
@@ -56,67 +58,58 @@ export async function processArticle(url: string, userId?: string) {
           accountName: existingArticle.accountName,
           publishDate: existingArticle.publishDate,
           originalUrl: url,
-          localPath: existingArticle.localPath, // Likely null now, but safe to copy
+          localPath: existingArticle.localPath,
           thumbnailPath: existingArticle.thumbnailPath,
           content: existingArticle.content,
+          contentHtml: existingArticle.contentHtml,
           status: 'stored',
-          userId: userId
-        }
+          userId,
+        },
       });
+
       return { success: true, articleId: newArticle.id, status: 'stored' };
     }
   }
 
-  // --- STEP 1: FALLBACK TO FULL SCRAPE (Cache Miss) ---
-  // 1. Create or Update DB Record (Pending)
-  // Note: Since we removed @unique from originalUrl, upsert by originalUrl is tricky if duplicates exist.
-  // But we handle per-user uniqueness now. 
-  // For anonymous or first-time crawl, we might create a new record or update an existing pending one?
-  // Let's stick to: Find existing for THIS user or create new.
-  
   let article;
-  
+
   if (userId) {
-     const userArticle = await prisma.article.findFirst({
-        where: { originalUrl: url, userId: userId }
-     });
-     
-     if (userArticle) {
-        article = await prisma.article.update({
-           where: { id: userArticle.id },
-           data: { status: 'crawling', updatedAt: new Date() }
-        });
-     } else {
-        article = await prisma.article.create({
-           data: {
-              title: 'Processing...',
-              originalUrl: url,
-              status: 'crawling',
-              userId: userId
-           }
-        });
-     }
-  } else {
-     // Anonymous: Just create a new temporary record (or could update a shared anonymous one?)
-     // For V0.6, let's just create new to be safe, cron job can clean up.
-     article = await prisma.article.create({
+    const userArticle = await prisma.article.findFirst({
+      where: { originalUrl: url, userId },
+    });
+
+    if (userArticle) {
+      article = await prisma.article.update({
+        where: { id: userArticle.id },
+        data: { status: 'crawling', updatedAt: new Date() },
+      });
+    } else {
+      article = await prisma.article.create({
         data: {
-           title: 'Processing...',
-           originalUrl: url,
-           status: 'crawling',
-           userId: null
-        }
-     });
+          title: 'Processing...',
+          originalUrl: url,
+          status: 'crawling',
+          userId,
+        },
+      });
+    }
+  } else {
+    article = await prisma.article.create({
+      data: {
+        title: 'Processing...',
+        originalUrl: url,
+        status: 'crawling',
+        userId: null,
+      },
+    });
   }
 
   try {
-    // --- STEP A: SCRAPE ---
     console.log(`[Scrape] Starting: ${url}`);
     const { html } = await scrapeWeChatArticle(url);
     const metadata = extractMetadata(html);
     const contentHtml = extractContent(html);
 
-    // Update Metadata
     article = await prisma.article.update({
       where: { id: article.id },
       data: {
@@ -129,25 +122,27 @@ export async function processArticle(url: string, userId?: string) {
 
     const initialMarkdown = convertToMarkdown(contentHtml, { ...metadata, url });
 
-    // --- STEP B: LOCALIZE ASSETS (Server-First) ---
-    // Download images to CAS (public/uploads)
-    console.log(`[Localize] Downloading assets to CAS storage...`);
-    const finalMarkdown = await localizeAssets(initialMarkdown, userId || 'anonymous', article.id);
+    console.log('[Localize] Downloading assets to CAS storage...');
+    const localizedContent = await localizeContentAssets(
+      initialMarkdown,
+      contentHtml,
+      userId || 'anonymous',
+      article.id
+    );
 
-    // --- STEP C: SAVE SUCCESS ---
     article = await prisma.article.update({
       where: { id: article.id },
       data: {
-        localPath: null, // Legacy: no longer used
-        content: finalMarkdown,
+        localPath: null,
+        content: localizedContent.markdown,
+        contentHtml: localizedContent.html,
         status: 'stored',
       },
     });
 
     console.log(`[Process] Article stored in DB: ${article.id}`);
     return { success: true, articleId: article.id, status: 'stored' };
-
-  } catch (error: any) {
+  } catch (error) {
     console.error('[Conductor] Process Error:', error);
     await prisma.article.update({
       where: { id: article.id },
@@ -163,107 +158,114 @@ export async function processArticle(url: string, userId?: string) {
  */
 export async function syncArticleToFeishu(articleId: string) {
   const article = await prisma.article.findUnique({ where: { id: articleId } });
-  if (!article || !article.content) {
+
+  if (!article || (!article.content && !article.contentHtml)) {
     throw new Error('Article not found or has no content');
   }
 
-  // Update status to syncing
-  await prisma.article.update({ where: { id: articleId }, data: { status: 'syncing' } });
+  if (!article.userId) {
+    throw new FeishuSyncError(
+      'FEISHU_BIND_REQUIRED',
+      'Only logged-in users with a connected Feishu account can sync articles.'
+    );
+  }
+
+  await prisma.article.update({
+    where: { id: articleId },
+    data: { status: 'syncing' },
+  });
+
+  let tempExportPath: string | null = null;
+  let tempDirPath: string | null = null;
 
   try {
     const client = new FeishuClient();
-    const userId = article.userId;
-
-    // Determine Token
-    let token: string = '';
-    if (userId) {
-      try {
-        token = await getValidUserAccessToken(userId);
-      } catch (error) {
-        console.log(`[Sync] User ${userId} fallback to Tenant Token.`);
-      }
-    }
-    if (!token) token = await client.getTenantAccessToken();
-
-    // 1. Get Root Folder
+    const token = await getValidUserAccessToken(article.userId);
     const rootToken = await client.getRootFolderToken(token);
+    const importSourceFolderToken = await client.ensureFolder(
+      rootToken,
+      'Wechat2doc Imports',
+      token
+    );
+    const safeTitle =
+      (article.title || 'wechat-article')
+        .replace(/[\\/:*?"<>|]/g, '_')
+        .trim()
+        .substring(0, 50) || 'wechat-article';
 
-    // 2. Upload Images to Feishu
-    let content = article.content;
-    const imageRegex = /!\[(.*?)\]\((.*?)\)/g;
-    let match;
-    const replacements: { original: string, newUrl: string }[] = [];
+    tempDirPath = fs.mkdtempSync(path.join(os.tmpdir(), 'feishu-sync-'));
+    tempExportPath = path.join(tempDirPath, `${safeTitle}.docx`);
 
-    const assetsFolderToken = await client.ensureAssetsFolder(rootToken, token);
-
-    while ((match = imageRegex.exec(content)) !== null) {
-      const [fullMatch, alt, imgPath] = match;
-      if (imgPath.startsWith('/uploads')) {
-        const absImgPath = path.join(process.cwd(), 'public', imgPath);
-        if (fs.existsSync(absImgPath)) {
-          try {
-            const fileToken = await client.uploadFile(absImgPath, assetsFolderToken, 'explorer', token);
-            replacements.push({ original: imgPath, newUrl: fileToken });
-          } catch (e: any) {
-            console.error(`[Sync] Upload failed: ${imgPath}`, e.message);
-          }
-        }
+    const docxBuffer = await exportArticleHtmlToDocxBuffer(
+      article.contentHtml || article.content || '',
+      {
+        author: article.author,
+        description: article.accountName || article.originalUrl,
+        title: article.title || 'wechat-article',
       }
-    }
+    );
+    fs.writeFileSync(tempExportPath, docxBuffer);
 
-    for (const r of replacements) {
-      content = content.replace(r.original, r.newUrl);
-    }
+    const importFileToken = await client.uploadFile(
+      tempExportPath,
+      importSourceFolderToken,
+      'explorer',
+      token
+    );
+    const ticket = await client.createImportTask(
+      importFileToken,
+      'docx',
+      rootToken,
+      token
+    );
 
-    // 3. Upload MD
-    content = content.replace(/^---\n([\s\S]*?)\n---\n/, ''); // Clean frontmatter
-    const safeTitle = article.title.replace(/[\\/:*?"<>|]/g, '_').substring(0, 50);
-
-    // Use System Tmp for sync process
-    const tempMdPath = path.join(os.tmpdir(), `feishu_sync_${article.id}_${Date.now()}.md`);
-    fs.writeFileSync(tempMdPath, content);
-
-    const mdToken = await client.uploadFile(tempMdPath, rootToken, 'explorer', token);
-    const ticket = await client.createImportTask(mdToken, 'md', rootToken, token);
-
-    // 4. Poll
     let feishuUrl = '';
-    for (let i = 0; i < 30; i++) {
-      await new Promise(r => setTimeout(r, 2000));
+    for (let i = 0; i < 30; i += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 2000));
       const status = await client.getImportResult(ticket, token);
+
       if (status.job_status === 0) {
         feishuUrl = status.url;
         break;
-      } else if (status.job_status > 2) {
+      }
+
+      if (status.job_status > 2) {
         throw new Error(`Feishu Import Failed: ${status.job_error_msg}`);
       }
     }
 
-    if (fs.existsSync(tempMdPath)) fs.unlinkSync(tempMdPath);
+    if (!feishuUrl) {
+      throw new Error('Feishu import timed out before returning a document URL.');
+    }
 
-    // 5. Success
     await prisma.article.update({
       where: { id: articleId },
       data: {
         status: 'synced',
-        feishuUrl: feishuUrl
-      }
+        feishuUrl,
+      },
     });
 
     return { success: true, feishuUrl };
-
-  } catch (error: any) {
+  } catch (error) {
     await prisma.article.update({
       where: { id: articleId },
-      data: { status: 'stored' }
+      data: { status: 'stored' },
     });
     throw error;
+  } finally {
+    if (tempExportPath && fs.existsSync(tempExportPath)) {
+      fs.unlinkSync(tempExportPath);
+    }
+
+    if (tempDirPath && fs.existsSync(tempDirPath)) {
+      fs.rmdirSync(tempDirPath);
+    }
   }
 }
 
-// Backward compatibility wrapper
 export async function conductorProcess(url: string, userId?: string) {
   const result = await processArticle(url, userId);
   console.log('[Conductor] Auto-syncing for migration compatibility...');
-  return await syncArticleToFeishu(result.articleId);
+  return syncArticleToFeishu(result.articleId);
 }

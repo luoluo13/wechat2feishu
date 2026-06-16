@@ -1,13 +1,51 @@
 #!/usr/bin/env node
 import { Command } from 'commander';
+import fs from 'fs/promises';
+import path from 'path';
 import { scrapeWeChatArticle } from '../lib/scraper';
 import { extractMetadata, extractContent } from '../lib/parser';
 import { convertToMarkdown } from '../lib/converter';
 import { localizeAssets } from '../lib/assets';
-import { getUniqueArticleDir, saveMarkdown } from '../lib/storage';
 import chalk from 'picocolors';
 
 const program = new Command();
+
+function slugify(input: string): string {
+  return input
+    .replace(/[\\/:*?"<>|]/g, ' ')
+    .replace(/\s+/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '')
+    .toLowerCase()
+    .slice(0, 80) || 'article';
+}
+
+async function getUniqueArticleDir(title: string, outputDir: string): Promise<string> {
+  const baseDir = path.resolve(process.cwd(), outputDir);
+  await fs.mkdir(baseDir, { recursive: true });
+
+  const baseName = slugify(title);
+  let candidate = path.join(baseDir, baseName);
+  let counter = 2;
+
+  // Keep CLI output deterministic without overwriting an existing export.
+  while (true) {
+    try {
+      await fs.access(candidate);
+      candidate = path.join(baseDir, `${baseName}-${counter}`);
+      counter += 1;
+    } catch {
+      await fs.mkdir(candidate, { recursive: true });
+      return candidate;
+    }
+  }
+}
+
+async function saveMarkdown(markdown: string, articleDir: string): Promise<string> {
+  const filePath = path.join(articleDir, 'article.md');
+  await fs.writeFile(filePath, markdown, 'utf8');
+  return filePath;
+}
 
 program
   .name('wgrab')

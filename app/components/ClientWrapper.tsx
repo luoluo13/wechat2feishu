@@ -5,6 +5,7 @@ import { useState } from 'react';
 import { useSession } from "next-auth/react";
 import { Header } from './Header';
 import { Footer } from './Footer';
+import { FeishuConnectionCard } from './FeishuConnectionCard';
 import { Hero } from './Hero';
 import { HistoryList } from './HistoryList';
 import { Sidebar } from './Sidebar';
@@ -81,6 +82,7 @@ export function ClientWrapper() {
                             </div>
 
                             {/* Content */}
+                            <FeishuConnectionCard />
                             <HistoryList refreshTrigger={refreshTrigger} isLoggedIn={true} layout={viewLayout} />
                         </div>
                     </main>

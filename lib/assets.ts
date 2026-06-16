@@ -1,14 +1,97 @@
 import axios from 'axios';
+import * as cheerio from 'cheerio';
 import fs from 'fs/promises';
 import path from 'path';
 import sharp from 'sharp';
-import { v4 as uuidv4 } from 'uuid';
 
 /**
  * Downloads an image from a URL, compresses it, and saves it to the user's upload directory
  * @returns The public URL path to the saved image
  */
 import crypto from 'crypto';
+
+function isRemoteAssetUrl(url: string) {
+  return /^https?:\/\//i.test(url);
+}
+
+function collectRemoteImageUrlsFromMarkdown(markdown: string) {
+  const imgRegex = /!\[(.*?)\]\((.*?)\)/g;
+  const urls: string[] = [];
+  let match;
+
+  while ((match = imgRegex.exec(markdown)) !== null) {
+    const originalUrl = match[2];
+    if (isRemoteAssetUrl(originalUrl)) {
+      urls.push(originalUrl);
+    }
+  }
+
+  return urls;
+}
+
+function collectRemoteImageUrlsFromHtml(html: string) {
+  const $ = cheerio.load(html, {}, false);
+  const urls: string[] = [];
+
+  $('img').each((_, element) => {
+    const src = $(element).attr('src') || $(element).attr('data-src') || '';
+    if (isRemoteAssetUrl(src)) {
+      urls.push(src);
+    }
+  });
+
+  return urls;
+}
+
+async function createAssetReplacementMap(urls: string[]) {
+  const uniqueUrls = Array.from(new Set(urls));
+  const replacements = await Promise.all(
+    uniqueUrls.map(async (original) => ({
+      original,
+      local: await downloadImageCAS(original),
+    }))
+  );
+
+  return new Map(
+    replacements
+      .filter((entry): entry is { original: string; local: string } => !!entry.local)
+      .map((entry) => [entry.original, entry.local])
+  );
+}
+
+function applyAssetReplacementsToMarkdown(markdown: string, replacements: Map<string, string>) {
+  let localizedMarkdown = markdown;
+
+  for (const [original, local] of Array.from(replacements.entries())) {
+    localizedMarkdown = localizedMarkdown.split(original).join(local);
+  }
+
+  return localizedMarkdown;
+}
+
+function applyAssetReplacementsToHtml(html: string, replacements: Map<string, string>) {
+  const $ = cheerio.load(html, {}, false);
+
+  $('img').each((_, element) => {
+    const $img = $(element);
+    const src = $img.attr('src') || '';
+    const dataSrc = $img.attr('data-src') || '';
+
+    if (src && replacements.has(src)) {
+      $img.attr('src', replacements.get(src)!);
+    }
+
+    if (dataSrc && replacements.has(dataSrc)) {
+      const local = replacements.get(dataSrc)!;
+      $img.attr('data-src', local);
+      if (!src) {
+        $img.attr('src', local);
+      }
+    }
+  });
+
+  return $.root().html() || '';
+}
 
 /**
  * Downloads an image from a URL, compresses it, and saves it using CAS (Content-Addressable Storage)
@@ -107,33 +190,23 @@ export async function localizeAssets(
   userId: string,
   articleId: string
 ): Promise<string> {
-  const imgRegex = /!\[(.*?)\]\((.*?)\)/g;
-  let match;
-  let localizedMarkdown = markdown;
-  const downloadPromises: Promise<{ original: string, local: string | null }>[] = [];
+  const replacements = await createAssetReplacementMap(collectRemoteImageUrlsFromMarkdown(markdown));
+  return applyAssetReplacementsToMarkdown(markdown, replacements);
+}
 
-  // Find all image links
-  while ((match = imgRegex.exec(markdown)) !== null) {
-    const originalUrl = match[2];
-    if (originalUrl.startsWith('http')) {
-      downloadPromises.push(
-        downloadImageCAS(originalUrl).then(localPath => ({
-          original: originalUrl,
-          local: localPath
-        }))
-      );
-    }
-  }
+export async function localizeContentAssets(
+  markdown: string,
+  html: string,
+  userId: string,
+  articleId: string
+) {
+  const replacements = await createAssetReplacementMap([
+    ...collectRemoteImageUrlsFromMarkdown(markdown),
+    ...collectRemoteImageUrlsFromHtml(html),
+  ]);
 
-  // Wait for all downloads to finish
-  const results = await Promise.all(downloadPromises);
-
-  // Replace original URLs with local paths
-  for (const res of results) {
-    if (res.local) {
-      localizedMarkdown = localizedMarkdown.split(res.original).join(res.local);
-    }
-  }
-
-  return localizedMarkdown;
+  return {
+    markdown: applyAssetReplacementsToMarkdown(markdown, replacements),
+    html: applyAssetReplacementsToHtml(html, replacements),
+  };
 }

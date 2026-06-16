@@ -3,15 +3,16 @@
 
 generator client {
   provider = "prisma-client-js"
+  output   = "../generated/prisma"
 }
 
 datasource db {
-  provider = "mongodb"
+  provider = "sqlite"
   url      = env("DATABASE_URL")
 }
 
 model User {
-  id                    String    @id @default(auto()) @map("_id") @db.ObjectId
+  id                    String    @id @default(cuid())
   email                 String?   @unique
   password              String?
   phoneNumber           String?
@@ -29,14 +30,19 @@ model User {
   updatedAt             DateTime  @updatedAt
   articleQuota          Int       @default(20)
   articles              Article[]
+
+  @@unique([phoneNumber])
+  @@unique([wechatUnionId])
+  @@unique([wechatOpenId])
+  @@unique([feishuUserId])
 }
 
 model VerificationToken {
-  id         String   @id @default(auto()) @map("_id") @db.ObjectId
+  id         String   @id @default(cuid())
   identifier String
   token      String
   expires    DateTime
-  type       String   
+  type       String
   attempts   Int      @default(0)
   createdAt  DateTime @default(now())
 
@@ -44,7 +50,7 @@ model VerificationToken {
 }
 
 model Article {
-  id            String   @id @default(auto()) @map("_id") @db.ObjectId
+  id            String   @id @default(cuid())
   title         String
   author        String?
   accountName   String?
@@ -54,11 +60,12 @@ model Article {
   thumbnailPath String?
   feishuUrl     String?
   content       String?
+  contentHtml   String?
   status        String   @default("pending") // pending, completed, error
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
-  
-  userId        String?  @db.ObjectId
+
+  userId        String?
   user          User?    @relation(fields: [userId], references: [id])
 
   @@unique([userId, originalUrl])

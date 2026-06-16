@@ -151,15 +151,15 @@ export function Header() {
   return (
     <header className="fixed top-0 w-full z-50 glass-nav border-b border-black/[0.03] dark:border-white/[0.08] transition-colors">
       <div className="max-w-[1200px] mx-auto flex items-center justify-between px-golden-sm h-16">
-        <a href="/" className="flex items-center gap-3 cursor-pointer hover:opacity-80 transition-opacity">
+        <Link href="/" className="flex items-center gap-3 cursor-pointer hover:opacity-80 transition-opacity">
           <div className="w-8 h-8 bg-black dark:bg-white rounded-[7px] flex items-center justify-center">
             <span className="material-symbols-outlined text-white dark:text-black text-[18px]">bolt</span>
           </div>
           <span className="font-semibold text-[19px] tracking-tight text-[#1d1d1f] dark:text-white">Wechat2doc</span>
-        </a>
+        </Link>
         <nav className="hidden md:flex items-center gap-8 text-[14px] font-medium text-black/60 dark:text-white/60">
-          <a className="hover:text-black dark:hover:text-white transition-colors" href="/">首页</a>
-          <a className="hover:text-black dark:hover:text-white transition-colors" href="/changelog">迭代记录</a>
+          <Link className="hover:text-black dark:hover:text-white transition-colors" href="/">首页</Link>
+          <Link className="hover:text-black dark:hover:text-white transition-colors" href="/changelog">迭代记录</Link>
         </nav>
 
         <div className="flex items-center gap-4">

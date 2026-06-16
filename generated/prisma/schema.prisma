@@ -1,0 +1,72 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+  output   = "../generated/prisma"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id                    String    @id @default(cuid())
+  email                 String?   @unique
+  password              String?
+  phoneNumber           String?
+  wechatUnionId         String?
+  wechatOpenId          String?
+  feishuUserId          String?
+  name                  String?
+  avatarUrl             String?
+  encryptedAccessToken  String?
+  encryptedRefreshToken String?
+  tokenExpiry           DateTime?
+  emailVerified         DateTime?
+  lastLoginAt           DateTime  @default(now())
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+  articleQuota          Int       @default(20)
+  articles              Article[]
+
+  @@unique([phoneNumber])
+  @@unique([wechatUnionId])
+  @@unique([wechatOpenId])
+  @@unique([feishuUserId])
+}
+
+model VerificationToken {
+  id         String   @id @default(cuid())
+  identifier String
+  token      String
+  expires    DateTime
+  type       String
+  attempts   Int      @default(0)
+  createdAt  DateTime @default(now())
+
+  @@unique([identifier, token])
+}
+
+model Article {
+  id            String   @id @default(cuid())
+  title         String
+  author        String?
+  accountName   String?
+  publishDate   DateTime?
+  originalUrl   String
+  localPath     String?
+  thumbnailPath String?
+  feishuUrl     String?
+  content       String?
+  contentHtml   String?
+  status        String   @default("pending") // pending, completed, error
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  userId        String?
+  user          User?    @relation(fields: [userId], references: [id])
+
+  @@unique([userId, originalUrl])
+}

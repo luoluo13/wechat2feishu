@@ -2,6 +2,7 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
+import Link from 'next/link';
 
 interface Article {
     id: string;
@@ -109,18 +110,14 @@ export function HistoryList({ refreshTrigger, isLoggedIn, layout = 'list' }: His
                             <span className="text-[11px] font-bold text-black/30 dark:text-white/30 bg-black/[0.03] dark:bg-white/5 px-2 py-1 rounded-md uppercase">微信文章</span>
                         </div>
 
-                        <a
-                            href={`/articles/${article.id}`}
-                            target="_self"
-                            className="block"
-                        >
+                        <Link href={`/articles/${article.id}`} className="block">
                             <h3 className="text-[16px] font-bold leading-snug mb-3 text-[#1d1d1f] dark:text-white group-hover:text-black dark:group-hover:text-white transition-colors line-clamp-2 min-h-[44px]">
                                 {article.title}
                             </h3>
                             <p className="text-[13px] text-black/45 dark:text-white/45 line-clamp-2 mb-4 leading-relaxed">
                                 {article.accountName ? `公众号：${article.accountName}` : '微信公众号文章归档...'}
                             </p>
-                        </a>
+                        </Link>
 
                         <div className="flex items-center justify-between pt-4 border-t border-black/[0.03] dark:border-white/5">
                             <span className="text-[11px] font-medium text-black/30 dark:text-white/30 italic">
@@ -200,9 +197,9 @@ export function HistoryList({ refreshTrigger, isLoggedIn, layout = 'list' }: His
                                         <div className="w-10 h-10 rounded-xl bg-vibrant-amber/10 flex items-center justify-center shrink-0">
                                             <span className="material-symbols-outlined text-vibrant-amber text-[20px]">article</span>
                                         </div>
-                                        <a href={`/articles/${article.id}`} className="text-[15px] font-bold text-[#1d1d1f] dark:text-white/90 line-clamp-1 hover:text-black dark:hover:text-white transition-colors block">
+                                        <Link href={`/articles/${article.id}`} className="text-[15px] font-bold text-[#1d1d1f] dark:text-white/90 line-clamp-1 hover:text-black dark:hover:text-white transition-colors block">
                                             {article.title}
-                                        </a>
+                                        </Link>
                                     </div>
                                 </td>
                                 <td className="px-6 py-6 whitespace-nowrap">
@@ -279,14 +276,23 @@ export function HistoryList({ refreshTrigger, isLoggedIn, layout = 'list' }: His
                                             )}
 
                                             <div className="flex flex-col gap-1">
-                                                <a
-                                                    href={viewMode === 'personal' ? `/articles/${article.id}` : article.originalUrl}
-                                                    target={viewMode === 'personal' ? "_self" : "_blank"}
-                                                    rel="noreferrer"
-                                                    className="text-[16px] font-semibold text-black/85 dark:text-white/90 leading-tight hover:text-black dark:hover:text-white transition-colors line-clamp-1 cursor-pointer"
-                                                >
-                                                    {article.title || '正在处理...'}
-                                                </a>
+                                                {viewMode === 'personal' ? (
+                                                    <Link
+                                                        href={`/articles/${article.id}`}
+                                                        className="text-[16px] font-semibold text-black/85 dark:text-white/90 leading-tight hover:text-black dark:hover:text-white transition-colors line-clamp-1 cursor-pointer"
+                                                    >
+                                                        {article.title || '正在处理...'}
+                                                    </Link>
+                                                ) : (
+                                                    <a
+                                                        href={article.originalUrl}
+                                                        target="_blank"
+                                                        rel="noreferrer"
+                                                        className="text-[16px] font-semibold text-black/85 dark:text-white/90 leading-tight hover:text-black dark:hover:text-white transition-colors line-clamp-1 cursor-pointer"
+                                                    >
+                                                        {article.title || '正在处理...'}
+                                                    </a>
+                                                )}
                                             </div>
                                         </div>
                                     </td>

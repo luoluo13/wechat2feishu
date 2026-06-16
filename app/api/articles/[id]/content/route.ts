@@ -13,7 +13,7 @@ export async function GET(
 
     const article = await prisma.article.findUnique({
       where: { id },
-      select: { content: true, userId: true, title: true }
+      select: { content: true, contentHtml: true, userId: true, title: true }
     });
 
     if (!article) {
@@ -32,6 +32,7 @@ export async function GET(
 
     return NextResponse.json({ 
         content: article.content,
+        contentHtml: article.contentHtml,
         title: article.title 
     });
   } catch (error) {

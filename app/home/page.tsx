@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import { useSession } from "next-auth/react";
 import { useRouter } from 'next/navigation';
 import { useTheme } from "next-themes";
+import Link from "next/link";
 import { Footer } from '../components/Footer';
 import { Hero } from '../components/Hero';
 import { HistoryList } from '../components/HistoryList';
@@ -70,7 +71,7 @@ export default function HomePage() {
 
                     <nav className="hidden md:flex items-center gap-8 text-[14px] font-medium text-black/60 dark:text-white/60">
                         <span className="text-black dark:text-white font-semibold cursor-default">首页</span>
-                        <a className="hover:text-black dark:hover:text-white transition-colors" href="/changelog">迭代记录</a>
+                        <Link className="hover:text-black dark:hover:text-white transition-colors" href="/changelog">迭代记录</Link>
                     </nav>
 
                     <div className="flex items-center gap-4">
@@ -96,20 +97,20 @@ export default function HomePage() {
 
                         {/* Action Button */}
                         {isLoggedIn ? (
-                            <a
+                            <Link
                                 href="/"
                                 className="px-5 py-1.5 rounded-full text-[13px] font-semibold transition-all flex items-center gap-2 tactile-button text-white"
                             >
                                 <span className="material-symbols-outlined text-[16px]">dashboard</span>
                                 进入控制台
-                            </a>
+                            </Link>
                         ) : (
-                            <a
+                            <Link
                                 href="/login"
                                 className="px-5 py-1.5 rounded-full border border-black/10 dark:border-white/10 text-[13px] font-semibold hover:bg-black hover:text-white dark:hover:bg-white dark:hover:text-black transition-all text-[#1d1d1f] dark:text-white bg-white dark:bg-white/5 shadow-sm"
                             >
                                 登录 / 注册
-                            </a>
+                            </Link>
                         )}
                     </div>
                 </div>
@@ -124,4 +125,3 @@ export default function HomePage() {
         </div>
     );
 }
-
